@@ -3,7 +3,7 @@ name: Validar API PHP
 on:
   push:
     branches:
-      - fix/busqueda-ruc-credito-20261110
+      - main
   pull_request:
     branches:
       - main
