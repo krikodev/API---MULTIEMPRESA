@@ -1,0 +1,27 @@
+name: Validar API PHP
+
+on:
+  push:
+    branches:
+      - fix/busqueda-ruc-credito-20261110
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  php-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@v4
+      - name: Preparar PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+      - name: Validar sintaxis de todos los PHP
+        run: |
+          find . -type f -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -r -n1 php -l
