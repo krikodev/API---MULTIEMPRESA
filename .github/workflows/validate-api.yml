@@ -22,6 +22,9 @@ jobs:
         with:
           php-version: '8.2'
           coverage: none
+          extensions: pdo_sqlite
       - name: Validar sintaxis de todos los PHP
         run: |
           find . -type f -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -r -n1 php -l
+      - name: Pruebas de integración HTTP con SQLite ficticia
+        run: bash tests/run_search_integration.sh
