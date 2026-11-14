@@ -28,3 +28,5 @@ jobs:
           find . -type f -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -r -n1 php -l
       - name: Pruebas de integración HTTP con SQLite ficticia
         run: bash tests/run_search_integration.sh
+      - name: Pruebas del cálculo automático del descuento
+        run: php tests/test_calculo_cobro.php
