@@ -173,6 +173,7 @@ function aplicarDescuentoProductosApp(
 
 // La conexión se resuelve centralmente según X-Company-Domain.
 require_once __DIR__ . '/config/conexion.php';
+require_once __DIR__ . '/config/calculo_cobro.php';
 
 // Leer y validar los datos recibidos.
 $idUsuario = filter_var(
@@ -227,27 +228,33 @@ foreach ($urlsFotos as $foto) {
     }
 }
 
-// NUEVO: dos fotografías requeridas por encomienda.
-if (count($urlsFotos) !== 2) {
-    responder(false, 'Se requieren exactamente dos fotos de evidencia.', 400);
+// La app nueva usa una foto; se aceptan temporalmente dos para que
+// los dispositivos con la versión anterior sigan pudiendo entregar.
+if (count($urlsFotos) < 1 || count($urlsFotos) > 2) {
+    responder(false, 'Se requiere una foto de evidencia (máximo dos para versiones anteriores).', 400);
 }
 
-if ($urlFirma !== '' && !filter_var($urlFirma, FILTER_VALIDATE_URL)) {
-    responder(false, 'La URL de la firma no es válida.', 400);
+// Toda entrega debe incluir firma. Se recibe como una URL independiente.
+if ($urlFirma === '' || !filter_var($urlFirma, FILTER_VALIDATE_URL)) {
+    responder(false, 'Debes adjuntar una firma válida para la entrega.', 400);
 }
 
+// Se acepta el descuento enviado por clientes antiguos solo para detectar
+// intentos de cobro en encomiendas que no lo requieren. Nunca se usa para
+// modificar el importe de la venta: lo calcula el servidor.
 if (
-    !is_numeric($descuentoRaw) ||
-    !is_numeric($montoRaw)
+    !preg_match('/^[0-9]+(?:\.[0-9]{1,2})?$/D', $descuentoRaw) ||
+    !preg_match('/^[0-9]+(?:\.[0-9]{1,2})?$/D', $montoRaw)
 ) {
-    responder(false, 'El descuento o el importe no son válidos.', 400);
+    responder(false, 'El descuento o el importe deben expresarse con máximo dos decimales.', 400);
 }
 
-$descuento = round((float) $descuentoRaw, 2);
+$descuentoEnviado = round((float) $descuentoRaw, 2);
 $montoCobrado = round((float) $montoRaw, 2);
+$descuento = 0.0;
 
-if ($descuento < 0 || $montoCobrado < 0) {
-    responder(false, 'Los importes no pueden ser negativos.', 400);
+if (!is_finite($descuentoEnviado) || !is_finite($montoCobrado)) {
+    responder(false, 'Los importes no son válidos.', 400);
 }
 
 try {
@@ -278,7 +285,7 @@ try {
     $estadoEncomienda = strtoupper(trim($encomienda['estado']));
 
     // NUEVO: solo se intenta cobrar en EN DESTINO + PAGO EN DESTINO.
-    $intentaCobrar = $montoCobrado > 0 || $descuento > 0;
+    $intentaCobrar = $montoCobrado > 0 || $descuentoEnviado > 0;
 
     $debeCobrar = (
         $estadoEncomienda === 'EN DESTINO' &&
@@ -315,17 +322,11 @@ try {
 
         $totalBruto = round((float) $venta['total'], 2);
 
-        if ($totalBruto <= 0) {
-            throw new Exception('La venta no tiene un importe pendiente válido.');
-        }
-
-        if ($descuento >= $totalBruto) {
-            throw new Exception(
-                'El descuento debe ser menor que el importe bruto.'
-            );
-        }
-
-        $totalNeto = round($totalBruto - $descuento, 2);
+        // El servidor determina el descuento a partir de lo efectivamente cobrado.
+        // Ejemplo: total S/100, recibido S/70 => descuento S/30.
+        $calculo = calcularCobroMovil($totalBruto, $montoCobrado);
+        $descuento = $calculo['descuento'];
+        $totalNeto = $calculo['total_neto'];
 
         // NUEVO: validar el medio de pago.
         if (!in_array($idMedioPago, [1, 2, 3], true)) {
@@ -344,13 +345,7 @@ try {
             throw new Exception('El medio de pago no está activo.');
         }
 
-        // NUEVO: verificar el importe calculado por el servidor.
-        if (abs($montoCobrado - $totalNeto) > 0.009) {
-            throw new Exception(
-                'El importe enviado no coincide con la deuda y el descuento calculados.'
-            );
-        }
-
+        // El descuento queda determinado únicamente por el cálculo anterior.
         // NUEVO: buscar la caja abierta del repartidor.
         $stmtCaja = $pdo->prepare(
             "SELECT id_caja_chica
@@ -555,7 +550,8 @@ try {
         ? 'Entrega y cobro registrados correctamente.'
         : 'Entrega registrada correctamente sin cobro.', 200, [
         'cobro_realizado' => $cobroRealizado,
-        'monto_cobrado' => $cobroRealizado ? $montoCobrado : 0
+        'monto_cobrado' => $cobroRealizado ? $montoCobrado : 0,
+        'descuento_aplicado' => $cobroRealizado ? $descuento : 0
     ]);
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) {
